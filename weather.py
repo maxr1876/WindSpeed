@@ -1,3 +1,13 @@
+
+# import requests
+# import pandas as pd
+# import csv
+# resp = requests.get('http://nomads.ncdc.noaa.gov/thredds/ncss/grid/ndgd/201605/20160525/LUIA98_KWBR_201605251900?var=U-component_of_wind&latitude=41.123587546&longitude=-70.13572160735384&time_start=2013-05-25T18%3A00%3A00Z&time_end=2013-05-25T18%3A00%3A00Z&temporal=point&time=2013-05-25T18%3A00%3A00Z&vertCoord=0&accept=csv&point=true')
+# v = resp.text
+# v = v.split(',')
+# print v
+# print v[8]
+
 import numpy as np
 import csv
 import urllib2
@@ -13,15 +23,17 @@ def isFloat(string):
     try:
         float(string)
         return True
-    except (ValueError, AttributeError):
+    except (ValueError, AttributeError, TypeError):
         return False
 
 theCSV = sys.argv[1]
-
+r = requests.Session()
 if theCSV.endswith(".csv"):
 	with open(theCSV, 'rw') as csvfile:
 		reader = csv.DictReader(csvfile)
 		place = 0
+		speeds = []
+		dirs = []
 		for row in reader:
 			date = row['PEAK_NUM'].split('_')[1]
 			modDate = date[0:4]+'-'+date[4:6]+'-'+date[6:8]
@@ -44,45 +56,60 @@ if theCSV.endswith(".csv"):
 			u = None
 			while v is None:
 				try:
-					v = urllib2.urlopen(v_comp)
-				except urllib2.HTTPError as e:
-					if e.code == 404:
+					v = r.get(v_comp)
+					v.raise_for_status()
+				except requests.exceptions.HTTPError as e:
+					if e.response.status_code == 404:
 						try:
-							v = urllib2.urlopen(v_comp.replace('LVIA', 'LVMA'))
-						except urllib2.HTTPError as e:
-							if e.code == 404:
+							v = r.get(v_comp.replace('LVIA', 'LVMA'))
+							v.raise_for_status()
+						except requests.exceptions.HTTPError as e:
+							if e.response.status_code == 404:
 								v = np.nan
+					else:
+						v = None
 					t.sleep(1)
 			while u is None:
 				try:	
-					u = urllib2.urlopen(u_comp)
-				except urllib2.HTTPError as e:
-					if e.code == 404:
+					u = r.get(u_comp)
+					u.raise_for_status()
+				except requests.exceptions.HTTPError as e:
+					if e.response.status_code == 404:
 						try:
-							u = urllib2.urlopen(u_comp.replace('LUIA', 'LUMA'))
-						except urllib2.HTTPError as e:
-							if e.code == 404:
+							u = r.get(u_comp.replace('LUIA', 'LUMA'))
+							u.raise_for_status()
+						except requests.exceptions.HTTPError as e:
+							if e.response.status_code == 404:
 								u = np.nan
+					else:
+						u = None
 					t.sleep(1)
-
 			if not isFloat(v):
-				vRead = pd.read_csv(v)
-				V = vRead['V-component_of_wind[unit="m s-1"]'].iloc[0] #you can also use df['column_name']
+				# vRead = pd.read_csv(v)
+				# V = vRead['V-component_of_wind[unit="m s-1"]'].iloc[0] #you can also use df['column_name']
+				try:
+					V = float(v.text.split(',')[8])
+				except IndexError:
+					print v
+					sys.exit()
 			else:
 				V = v
 			if not isFloat(u):
-				uRead = pd.read_csv(u)
-				U = uRead['U-component_of_wind[unit="m s-1"]'].iloc[0]
+				# uRead = pd.read_csv(u)
+				# U = uRead['U-component_of_wind[unit="m s-1"]'].iloc[0]
+				U = float(v.text.split(',')[8])
 			else:
 				U = u
 		   	if np.isnan(V) or np.isnan(U):
-		   		csv_input = pd.read_csv(theCSV)
-				csv_input['Wind_Speed'].iloc[place] = 'N/A'
-				csv_input['Wind_dir'].iloc[place] = 'N/A'
+		   		# csv_input = pd.read_csv(theCSV)
+				# csv_input['Wind_Speed'].iloc[place] = 'N/A'
+				# csv_input['Wind_dir'].iloc[place] = 'N/A'
+				speeds.append('N/A')
+				dirs.append('N/A')
 				place += 1
 				print 'Wind direction: ' + str('N/A')
 				print 'Wind speed: ' + str('N/A')
-				csv_input.to_csv(theCSV, index=False)
+				# csv_input.to_csv(theCSV, index=False)
 			else:
 				DperR = 180.0/math.pi
 				direction = 270 - (math.atan2(V,U) * DperR)
@@ -106,10 +133,17 @@ if theCSV.endswith(".csv"):
 				elif direction>330:
 					direction = "S"
 
-				csv_input = pd.read_csv(theCSV)
-				csv_input['Wind_Speed'].iloc[place] = speed
-				csv_input['Wind_dir'].iloc[place] = direction
+				# csv_input = pd.read_csv(theCSV)
+				# csv_input['Wind_Speed'].iloc[place] = speed
+				# csv_input['Wind_dir'].iloc[place] = direction
+				speeds.append(speed)
+				dirs.append(direction)
+				print place
 				place += 1
 				print 'Wind direction: ' + str(direction)
 				print 'Wind speed: ' + str(speed)
-				csv_input.to_csv(theCSV, index=False)
+				# csv_input.to_csv(theCSV, index=False)
+		csv_input = pd.read_csv(theCSV)
+		csv_input['Wind_Speed'] = speeds
+		csv_input['Wind_dir'] = dirs
+		csv_input.to_csv(theCSV, index=False)
